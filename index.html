@@ -1,0 +1,175 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <title>05MC_res1m_CS</title>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" crossorigin="" />
+  <style>
+    html, body, #map { height: 100%; margin: 0; }
+    body { font-family: -apple-system, BlinkMacSystemFont, sans-serif; }
+    .leaflet-control-layers { font-size: 14px; }
+    .info {
+      background: rgba(255,255,255,0.92);
+      padding: 10px 12px;
+      border-radius: 10px;
+      box-shadow: 0 2px 12px rgba(0,0,0,0.15);
+      line-height: 1.4;
+    }
+        .locate-button {
+            background: #ffffff;
+            border: 0;
+            width: 36px;
+            height: 36px;
+            font-size: 18px;
+            border-radius: 8px;
+            cursor: pointer;
+        }
+        .location-status {
+            background: rgba(255,255,255,0.92);
+            padding: 8px 10px;
+            border-radius: 10px;
+            box-shadow: 0 2px 12px rgba(0,0,0,0.15);
+            line-height: 1.4;
+            max-width: 220px;
+            font-size: 12px;
+        }
+  </style>
+</head>
+<body>
+  <div id="map"></div>
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" crossorigin=""></script>
+  <script>
+    const bounds = [[35.2810719, 133.5700478], [35.3353677, 133.6296927]];
+
+    const map = L.map('map', {
+      zoomControl: true,
+      preferCanvas: true
+    });
+        let locationMarker = null;
+        let accuracyCircle = null;
+
+    const gsi = L.tileLayer(
+      'https://cyberjapandata.gsi.go.jp/xyz/std/{z}/{x}/{y}.png',
+      {
+        attribution: '&copy; <a href="https://maps.gsi.go.jp/development/ichiran.html">地理院タイル</a>',
+        maxZoom: 18
+      }
+    );
+
+    const overlay = L.tileLayer('./tiles/{z}/{x}/{y}.png', {
+      attribution: 'Overlay from GeoTIFF',
+      minZoom: 13,
+      maxZoom: 18,
+      opacity: 0.82,
+      tms: false,
+      bounds: bounds
+    });
+
+    gsi.addTo(map);
+    overlay.addTo(map);
+    map.fitBounds(bounds, { padding: [12, 12] });
+
+    L.control.layers(
+      { '地理院タイル': gsi },
+      { '05MC_res1m_CS': overlay },
+      { collapsed: false }
+    ).addTo(map);
+
+    const info = L.control({ position: 'topright' });
+    info.onAdd = function() {
+      const div = L.DomUtil.create('div', 'info');
+      div.innerHTML = '<strong>05MC_res1m_CS</strong><br>GeoTIFF から生成した iPhone 向け Web 地図';
+      return div;
+    };
+    info.addTo(map);
+
+        const statusControl = L.control({ position: 'bottomleft' });
+        statusControl.onAdd = function() {
+            const div = L.DomUtil.create('div', 'location-status');
+            div.id = 'location-status';
+            div.textContent = window.isSecureContext
+                ? '現在地ボタンで iPhone の位置を表示できます'
+                : '現在地取得には HTTPS 公開が必要です';
+            return div;
+        };
+        statusControl.addTo(map);
+
+        function setStatus(message) {
+            const status = document.getElementById('location-status');
+            if (status) {
+                status.textContent = message;
+            }
+        }
+
+        function updateLocation(latlng, accuracy) {
+            if (!locationMarker) {
+                locationMarker = L.marker(latlng).addTo(map);
+            } else {
+                locationMarker.setLatLng(latlng);
+            }
+
+            if (!accuracyCircle) {
+                accuracyCircle = L.circle(latlng, {
+                    radius: accuracy,
+                    color: '#1779ba',
+                    weight: 1,
+                    fillColor: '#4da3d9',
+                    fillOpacity: 0.18
+                }).addTo(map);
+            } else {
+                accuracyCircle.setLatLng(latlng);
+                accuracyCircle.setRadius(accuracy);
+            }
+
+            setStatus(`現在地を更新しました。誤差 約${Math.round(accuracy)}m`);
+            map.flyTo(latlng, Math.max(map.getZoom(), 16), { duration: 0.8 });
+        }
+
+        function locateUser() {
+            if (!window.isSecureContext) {
+                setStatus('現在地取得には HTTPS 公開が必要です');
+                return;
+            }
+
+            if (!navigator.geolocation) {
+                setStatus('このブラウザは位置情報APIに対応していません');
+                return;
+            }
+
+            setStatus('現在地を取得しています...');
+            navigator.geolocation.getCurrentPosition(
+                (position) => {
+                    const latlng = [position.coords.latitude, position.coords.longitude];
+                    updateLocation(latlng, position.coords.accuracy || 20);
+                },
+                (error) => {
+                    const errors = {
+                        1: '位置情報の利用が許可されていません',
+                        2: '現在地を取得できませんでした',
+                        3: '位置情報の取得がタイムアウトしました'
+                    };
+                    setStatus(errors[error.code] || '位置情報の取得に失敗しました');
+                },
+                {
+                    enableHighAccuracy: true,
+                    timeout: 15000,
+                    maximumAge: 0
+                }
+            );
+        }
+
+        const locateControl = L.control({ position: 'topleft' });
+        locateControl.onAdd = function() {
+            const button = L.DomUtil.create('button', 'locate-button');
+            button.type = 'button';
+            button.title = '現在地を表示';
+            button.textContent = '◎';
+            L.DomEvent.disableClickPropagation(button);
+            L.DomEvent.on(button, 'click', locateUser);
+            return button;
+        };
+        locateControl.addTo(map);
+  </script>
+</body>
+</html>
