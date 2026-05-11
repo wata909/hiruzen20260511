@@ -3,7 +3,7 @@
 <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
-    <title>05MC_res1m_CS</title>
+    <title>CS立体図ビューア</title>
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" crossorigin="" />
     <style>
         html, body, #map { height: 100%; margin: 0; }
@@ -139,7 +139,7 @@
         const info = L.control({ position: 'topright' });
         info.onAdd = function() {
             const div = L.DomUtil.create('div', 'panel info');
-            div.innerHTML = '<strong>05MC_res1m_CS</strong><br>表示モードを切り替えながら、iPhone の GNSS を地図上へ記録できます。';
+            div.innerHTML = '<strong>CS立体図ビューア</strong><br>表示モードを切り替えながら、iPhone の GNSS を地図上へ記録できます。';
             return div;
         };
         info.addTo(map);
@@ -148,8 +148,9 @@
         statusControl.onAdd = function() {
             const div = L.DomUtil.create('div', 'panel location-status');
             div.id = 'location-status';
+            div.style.display = window.isSecureContext ? 'none' : 'block';
             div.textContent = window.isSecureContext
-                ? '現在地表示は単発、ログ開始は継続取得です'
+                ? ''
                 : '現在地取得には HTTPS 公開が必要です';
             return div;
         };
@@ -191,6 +192,7 @@
         function setStatus(message) {
             const status = document.getElementById('location-status');
             if (status) {
+                status.style.display = message ? 'block' : 'none';
                 status.textContent = message;
             }
         }
