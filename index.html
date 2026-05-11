@@ -1,99 +1,192 @@
 <!doctype html>
 <html lang="ja">
 <head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
-  <title>05MC_res1m_CS</title>
-  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" crossorigin="" />
-  <style>
-    html, body, #map { height: 100%; margin: 0; }
-    body { font-family: -apple-system, BlinkMacSystemFont, sans-serif; }
-    .leaflet-control-layers { font-size: 14px; }
-    .info {
-      background: rgba(255,255,255,0.92);
-      padding: 10px 12px;
-      border-radius: 10px;
-      box-shadow: 0 2px 12px rgba(0,0,0,0.15);
-      line-height: 1.4;
-    }
-        .locate-button {
-            background: #ffffff;
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+    <title>05MC_res1m_CS</title>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" crossorigin="" />
+    <style>
+        html, body, #map { height: 100%; margin: 0; }
+        body { font-family: -apple-system, BlinkMacSystemFont, sans-serif; }
+        .leaflet-control-layers { font-size: 14px; max-width: 240px; }
+        .panel {
+            background: rgba(255, 255, 255, 0.94);
+            padding: 10px 12px;
+            border-radius: 12px;
+            box-shadow: 0 2px 12px rgba(0, 0, 0, 0.16);
+            line-height: 1.5;
+            backdrop-filter: blur(4px);
+        }
+        .info { max-width: 260px; font-size: 13px; }
+        .location-status { max-width: 260px; font-size: 12px; }
+        .log-panel { max-width: 310px; font-size: 12px; }
+        .log-panel strong { display: block; margin-bottom: 4px; }
+        .log-meta { color: #425466; margin-bottom: 6px; }
+        .log-list {
+            margin: 0;
+            padding-left: 18px;
+            max-height: 120px;
+            overflow: auto;
+        }
+        .log-list li { margin-bottom: 2px; }
+        .map-actions {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+        .map-actions button {
+            appearance: none;
             border: 0;
-            width: 36px;
-            height: 36px;
-            font-size: 18px;
-            border-radius: 8px;
+            background: #ffffff;
+            color: #1f2937;
+            min-width: 108px;
+            padding: 10px 12px;
+            border-radius: 10px;
+            font-size: 13px;
+            font-weight: 600;
+            text-align: left;
+            box-shadow: 0 2px 10px rgba(0, 0, 0, 0.14);
             cursor: pointer;
         }
-        .location-status {
-            background: rgba(255,255,255,0.92);
-            padding: 8px 10px;
-            border-radius: 10px;
-            box-shadow: 0 2px 12px rgba(0,0,0,0.15);
-            line-height: 1.4;
-            max-width: 220px;
-            font-size: 12px;
+        .map-actions button.is-active {
+            background: #14532d;
+            color: #ffffff;
         }
-  </style>
+        .map-actions button.is-danger {
+            background: #7f1d1d;
+            color: #ffffff;
+        }
+        @media (max-width: 640px) {
+            .leaflet-top.leaflet-left { margin-top: 54px; }
+            .leaflet-control-layers { max-width: 190px; }
+            .log-panel { max-width: 250px; }
+            .map-actions button { min-width: 92px; padding: 9px 10px; font-size: 12px; }
+        }
+    </style>
 </head>
 <body>
-  <div id="map"></div>
-  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" crossorigin=""></script>
-  <script>
-    const bounds = [[35.2810719, 133.5700478], [35.3353677, 133.6296927]];
+    <div id="map"></div>
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" crossorigin=""></script>
+    <script>
+        const bounds = [[35.2810719, 133.5700478], [35.3353677, 133.6296927]];
+        const storageKey = 'hiruzen-gnss-log-v1';
 
-    const map = L.map('map', {
-      zoomControl: true,
-      preferCanvas: true
-    });
+        const map = L.map('map', {
+            zoomControl: true,
+            preferCanvas: true,
+            layers: []
+        });
+
         let locationMarker = null;
         let accuracyCircle = null;
+        let watchId = null;
+        let isLogging = false;
+        let gnssLog = [];
 
-    const gsi = L.tileLayer(
-      'https://cyberjapandata.gsi.go.jp/xyz/std/{z}/{x}/{y}.png',
-      {
-        attribution: '&copy; <a href="https://maps.gsi.go.jp/development/ichiran.html">地理院タイル</a>',
-        maxZoom: 18
-      }
-    );
+        function createStdLayer() {
+            return L.tileLayer(
+                'https://cyberjapandata.gsi.go.jp/xyz/std/{z}/{x}/{y}.png',
+                {
+                    attribution: '&copy; <a href="https://maps.gsi.go.jp/development/ichiran.html">地理院タイル</a>',
+                    maxZoom: 18
+                }
+            );
+        }
 
-    const overlay = L.tileLayer('./tiles/{z}/{x}/{y}.png', {
-      attribution: 'Overlay from GeoTIFF',
-      minZoom: 13,
-      maxZoom: 18,
-      opacity: 0.82,
-      tms: false,
-      bounds: bounds
-    });
+        function createPhotoLayer() {
+            return L.tileLayer(
+                'https://cyberjapandata.gsi.go.jp/xyz/seamlessphoto/{z}/{x}/{y}.jpg',
+                {
+                    attribution: '&copy; <a href="https://maps.gsi.go.jp/development/ichiran.html">地理院タイル 写真</a>',
+                    minZoom: 9,
+                    maxZoom: 18
+                }
+            );
+        }
 
-    gsi.addTo(map);
-    overlay.addTo(map);
-    map.fitBounds(bounds, { padding: [12, 12] });
+        function createCsLayer() {
+            return L.tileLayer('./tiles/{z}/{x}/{y}.png', {
+                attribution: 'CS立体図 from GeoTIFF',
+                minZoom: 13,
+                maxZoom: 18,
+                opacity: 0.9,
+                tms: false,
+                bounds: bounds
+            });
+        }
 
-    L.control.layers(
-      { '地理院タイル': gsi },
-      { '05MC_res1m_CS': overlay },
-      { collapsed: false }
-    ).addTo(map);
+        const stdLayer = createStdLayer();
+        const aerialLayer = createPhotoLayer();
+        const csBaseLayer = L.layerGroup([createPhotoLayer(), createCsLayer()]);
+        const gnssLayer = L.layerGroup();
 
-    const info = L.control({ position: 'topright' });
-    info.onAdd = function() {
-      const div = L.DomUtil.create('div', 'info');
-      div.innerHTML = '<strong>05MC_res1m_CS</strong><br>GeoTIFF から生成した iPhone 向け Web 地図';
-      return div;
-    };
-    info.addTo(map);
+        csBaseLayer.addTo(map);
+        gnssLayer.addTo(map);
+        map.fitBounds(bounds, { padding: [12, 12] });
+
+        L.control.layers(
+            {
+                'CS立体図': csBaseLayer,
+                '現在の空中写真': aerialLayer,
+                '地理院地図': stdLayer
+            },
+            {
+                'GNSSログ': gnssLayer
+            },
+            { collapsed: false }
+        ).addTo(map);
+
+        const info = L.control({ position: 'topright' });
+        info.onAdd = function() {
+            const div = L.DomUtil.create('div', 'panel info');
+            div.innerHTML = '<strong>05MC_res1m_CS</strong><br>表示モードを切り替えながら、iPhone の GNSS を地図上へ記録できます。';
+            return div;
+        };
+        info.addTo(map);
 
         const statusControl = L.control({ position: 'bottomleft' });
         statusControl.onAdd = function() {
-            const div = L.DomUtil.create('div', 'location-status');
+            const div = L.DomUtil.create('div', 'panel location-status');
             div.id = 'location-status';
             div.textContent = window.isSecureContext
-                ? '現在地ボタンで iPhone の位置を表示できます'
+                ? '現在地表示は単発、ログ開始は継続取得です'
                 : '現在地取得には HTTPS 公開が必要です';
             return div;
         };
         statusControl.addTo(map);
+
+        const logControl = L.control({ position: 'bottomright' });
+        logControl.onAdd = function() {
+            const div = L.DomUtil.create('div', 'panel log-panel');
+            div.id = 'gnss-log-panel';
+            div.innerHTML = '<strong>GNSSログ</strong><div class="log-meta">0点</div><ol class="log-list"><li>まだ記録はありません</li></ol>';
+            return div;
+        };
+        logControl.addTo(map);
+
+        const actionControl = L.control({ position: 'topleft' });
+        actionControl.onAdd = function() {
+            const container = L.DomUtil.create('div', 'map-actions');
+
+            const locateButton = L.DomUtil.create('button', '', container);
+            locateButton.type = 'button';
+            locateButton.id = 'locate-once-button';
+            locateButton.textContent = '現在地を表示';
+
+            const logButton = L.DomUtil.create('button', '', container);
+            logButton.type = 'button';
+            logButton.id = 'toggle-log-button';
+            logButton.textContent = 'ログ開始';
+
+            const clearButton = L.DomUtil.create('button', 'is-danger', container);
+            clearButton.type = 'button';
+            clearButton.id = 'clear-log-button';
+            clearButton.textContent = 'ログ消去';
+
+            L.DomEvent.disableClickPropagation(container);
+            return container;
+        };
+        actionControl.addTo(map);
 
         function setStatus(message) {
             const status = document.getElementById('location-status');
@@ -102,7 +195,111 @@
             }
         }
 
-        function updateLocation(latlng, accuracy) {
+        function formatTime(timestamp) {
+            return new Date(timestamp).toLocaleTimeString('ja-JP', {
+                hour: '2-digit',
+                minute: '2-digit',
+                second: '2-digit'
+            });
+        }
+
+        function updateLogButton() {
+            const button = document.getElementById('toggle-log-button');
+            if (!button) {
+                return;
+            }
+            button.textContent = isLogging ? 'ログ停止' : 'ログ開始';
+            button.classList.toggle('is-active', isLogging);
+        }
+
+        function saveLog() {
+            try {
+                localStorage.setItem(storageKey, JSON.stringify(gnssLog));
+            } catch (error) {
+                console.warn('GNSSログを保存できませんでした', error);
+            }
+        }
+
+        function loadLog() {
+            try {
+                const raw = localStorage.getItem(storageKey);
+                if (!raw) {
+                    gnssLog = [];
+                    return;
+                }
+                const parsed = JSON.parse(raw);
+                gnssLog = Array.isArray(parsed) ? parsed : [];
+            } catch (error) {
+                gnssLog = [];
+            }
+        }
+
+        function renderLogPanel() {
+            const panel = document.getElementById('gnss-log-panel');
+            if (!panel) {
+                return;
+            }
+
+            const summary = gnssLog.length + '点';
+            const recentEntries = gnssLog.slice(-5).reverse();
+
+            let listHtml = '';
+            if (!recentEntries.length) {
+                listHtml = '<li>まだ記録はありません</li>';
+            } else {
+                listHtml = recentEntries.map(function(entry, index) {
+                    const label = gnssLog.length - index;
+                    const lat = Number(entry.lat).toFixed(6);
+                    const lng = Number(entry.lng).toFixed(6);
+                    const accuracy = Math.round(entry.accuracy || 0);
+                    return '<li>#' + label + ' ' + formatTime(entry.timestamp) + ' / ' + lat + ', ' + lng + ' / ±' + accuracy + 'm</li>';
+                }).join('');
+            }
+
+            panel.innerHTML = '<strong>GNSSログ</strong>'
+                + '<div class="log-meta">' + summary + (isLogging ? ' / 記録中' : '') + '</div>'
+                + '<ol class="log-list">' + listHtml + '</ol>';
+        }
+
+        function redrawGnssLayer() {
+            gnssLayer.clearLayers();
+            if (!gnssLog.length) {
+                renderLogPanel();
+                return;
+            }
+
+            const latlngs = gnssLog.map(function(entry) {
+                return [entry.lat, entry.lng];
+            });
+
+            L.polyline(latlngs, {
+                color: '#b91c1c',
+                weight: 3,
+                opacity: 0.85
+            }).addTo(gnssLayer);
+
+            gnssLog.forEach(function(entry, index) {
+                L.circleMarker([entry.lat, entry.lng], {
+                    radius: index === gnssLog.length - 1 ? 6 : 4,
+                    color: '#7f1d1d',
+                    weight: 1,
+                    fillColor: index === gnssLog.length - 1 ? '#ef4444' : '#fca5a5',
+                    fillOpacity: 0.9
+                })
+                    .bindPopup(
+                        'GNSSログ #' + (index + 1)
+                        + '<br>' + new Date(entry.timestamp).toLocaleString('ja-JP')
+                        + '<br>緯度: ' + Number(entry.lat).toFixed(6)
+                        + '<br>経度: ' + Number(entry.lng).toFixed(6)
+                        + '<br>精度: ±' + Math.round(entry.accuracy || 0) + 'm'
+                    )
+                    .addTo(gnssLayer);
+            });
+
+            renderLogPanel();
+        }
+
+        function updateCurrentLocation(latlng, accuracy, flyTo) {
             if (!locationMarker) {
                 locationMarker = L.marker(latlng).addTo(map);
             } else {
@@ -122,34 +319,100 @@
                 accuracyCircle.setRadius(accuracy);
             }
 
-            setStatus(`現在地を更新しました。誤差 約${Math.round(accuracy)}m`);
-            map.flyTo(latlng, Math.max(map.getZoom(), 16), { duration: 0.8 });
+            if (flyTo) {
+                map.flyTo(latlng, Math.max(map.getZoom(), 16), { duration: 0.8 });
+            }
         }
 
-        function locateUser() {
+        function pushLog(position, flyTo) {
+            const entry = {
+                lat: position.coords.latitude,
+                lng: position.coords.longitude,
+                accuracy: position.coords.accuracy || 20,
+                timestamp: position.timestamp || Date.now()
+            };
+
+            gnssLog.push(entry);
+            saveLog();
+            redrawGnssLayer();
+            updateCurrentLocation([entry.lat, entry.lng], entry.accuracy, flyTo);
+            setStatus('GNSSログを記録しました。' + gnssLog.length + '点目 / 誤差 約' + Math.round(entry.accuracy) + 'm');
+        }
+
+        function handleLocationError(error) {
+            const messages = {
+                1: '位置情報の利用が許可されていません',
+                2: '現在地を取得できませんでした',
+                3: '位置情報の取得がタイムアウトしました'
+            };
+            setStatus(messages[error.code] || '位置情報の取得に失敗しました');
+        }
+
+        function geolocationAvailable() {
             if (!window.isSecureContext) {
                 setStatus('現在地取得には HTTPS 公開が必要です');
-                return;
+                return false;
             }
-
             if (!navigator.geolocation) {
                 setStatus('このブラウザは位置情報APIに対応していません');
+                return false;
+            }
+            return true;
+        }
+
+        function locateUserOnce() {
+            if (!geolocationAvailable()) {
                 return;
             }
 
             setStatus('現在地を取得しています...');
             navigator.geolocation.getCurrentPosition(
-                (position) => {
+                function(position) {
                     const latlng = [position.coords.latitude, position.coords.longitude];
-                    updateLocation(latlng, position.coords.accuracy || 20);
+                    const accuracy = position.coords.accuracy || 20;
+                    updateCurrentLocation(latlng, accuracy, true);
+                    setStatus('現在地を更新しました。誤差 約' + Math.round(accuracy) + 'm');
                 },
-                (error) => {
-                    const errors = {
-                        1: '位置情報の利用が許可されていません',
-                        2: '現在地を取得できませんでした',
-                        3: '位置情報の取得がタイムアウトしました'
-                    };
-                    setStatus(errors[error.code] || '位置情報の取得に失敗しました');
+                handleLocationError,
+                {
+                    enableHighAccuracy: true,
+                    timeout: 15000,
+                    maximumAge: 0
+                }
+            );
+        }
+
+        function stopLogging() {
+            if (watchId !== null) {
+                navigator.geolocation.clearWatch(watchId);
+                watchId = null;
+            }
+            isLogging = false;
+            updateLogButton();
+            setStatus('GNSSログを停止しました');
+            renderLogPanel();
+        }
+
+        function startLogging() {
+            if (!geolocationAvailable()) {
+                return;
+            }
+            if (isLogging) {
+                return;
+            }
+
+            isLogging = true;
+            updateLogButton();
+            setStatus('GNSSログを開始しました...');
+            renderLogPanel();
+
+            watchId = navigator.geolocation.watchPosition(
+                function(position) {
+                    pushLog(position, gnssLog.length === 0);
+                },
+                function(error) {
+                    handleLocationError(error);
+                    stopLogging();
                 },
                 {
                     enableHighAccuracy: true,
@@ -159,17 +422,31 @@
             );
         }
 
-        const locateControl = L.control({ position: 'topleft' });
-        locateControl.onAdd = function() {
-            const button = L.DomUtil.create('button', 'locate-button');
-            button.type = 'button';
-            button.title = '現在地を表示';
-            button.textContent = '◎';
-            L.DomEvent.disableClickPropagation(button);
-            L.DomEvent.on(button, 'click', locateUser);
-            return button;
-        };
-        locateControl.addTo(map);
-  </script>
+        function toggleLogging() {
+            if (isLogging) {
+                stopLogging();
+            } else {
+                startLogging();
+            }
+        }
+
+        function clearLog() {
+            gnssLog = [];
+            saveLog();
+            redrawGnssLayer();
+            setStatus('GNSSログを消去しました');
+        }
+
+        loadLog();
+        redrawGnssLayer();
+        updateLogButton();
+        if (gnssLog.length) {
+            setStatus('保存済みの GNSSログを ' + gnssLog.length + '点読み込みました');
+        }
+
+        document.getElementById('locate-once-button').addEventListener('click', locateUserOnce);
+        document.getElementById('toggle-log-button').addEventListener('click', toggleLogging);
+        document.getElementById('clear-log-button').addEventListener('click', clearLog);
+    </script>
 </body>
 </html>
